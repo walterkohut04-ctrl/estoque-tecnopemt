@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Plus, Minus, Search, AlertTriangle, Package, Trash2, Pencil, X, History,
-  MapPin, Loader2, ChevronDown, ChevronUp, User, Camera, ImageOff, Download,
+  MapPin, Loader2, ChevronDown, ChevronUp, User, Camera, ImageOff, Download, Sparkles,
 } from "lucide-react";
 import { db } from "./firebase";
+import { reconhecerComponentePorFoto, gerarResumoIA } from "./gemini";
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc,
   query, orderBy, getDocs, writeBatch, serverTimestamp,
@@ -572,6 +573,19 @@ function ComponentCard({ comp, expanded, onToggle, onEdit, onDelete, onMove, mov
               {comp.descricao && (
                 <p className="mb-2" style={{ color: COLORS.dark }}><span className="font-medium">Descrição: </span>{comp.descricao}</p>
               )}
+              {comp.resumoIA && (
+                <div className="mb-3 rounded p-2.5" style={{ background: "#FBEBDB" }}>
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <Sparkles size={13} color={COLORS.orangeDark} />
+                    <span className="text-xs font-medium" style={{ color: COLORS.orangeDark }}>
+                      RESUMO TÉCNICO (gerado por IA{comp.resumoIA.incerto ? " — confirmar" : ""})
+                    </span>
+                  </div>
+                  <p className="text-xs mb-1" style={{ color: COLORS.dark }}><span className="font-medium">Tipo: </span>{comp.resumoIA.tipo}</p>
+                  <p className="text-xs mb-1" style={{ color: COLORS.dark }}><span className="font-medium">Pinagem: </span>{comp.resumoIA.pinagem}</p>
+                  <p className="text-xs" style={{ color: COLORS.dark }}><span className="font-medium">Função: </span>{comp.resumoIA.funcao}</p>
+                </div>
+              )}
               <div className="flex gap-4 flex-wrap mb-2" style={{ color: COLORS.textMuted }}>
                 <span>
                   <span className="font-medium" style={{ color: COLORS.dark }}>Última compra: </span>
@@ -620,11 +634,16 @@ function ComponentForm({ initial, onCancel, onSave }) {
     localCompra: initial?.localCompra || "",
     observacao: initial?.observacao || "",
     foto: initial?.foto || "",
+    resumoIA: initial?.resumoIA || null,
   });
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const [fotoLoading, setFotoLoading] = useState(false);
+  const [fotoStatus, setFotoStatus] = useState("");
   const [fotoError, setFotoError] = useState("");
+  const [autoPreenchido, setAutoPreenchido] = useState(false);
+  const [iaLoading, setIaLoading] = useState(false);
+  const [iaError, setIaError] = useState("");
   const [salvando, setSalvando] = useState(false);
 
   function set(k, v) {
@@ -635,14 +654,56 @@ function ComponentForm({ initial, onCancel, onSave }) {
     const file = e.target.files?.[0];
     if (!file) return;
     setFotoError("");
+    setAutoPreenchido(false);
     setFotoLoading(true);
+    setFotoStatus("Processando foto...");
+    let dataUrl;
     try {
-      const dataUrl = await compressImage(file);
+      dataUrl = await compressImage(file);
       set("foto", dataUrl);
     } catch (err) {
       setFotoError("Não foi possível processar a foto. Tente outra imagem.");
+      setFotoLoading(false);
+      setFotoStatus("");
+      return;
+    }
+
+    setFotoStatus("Analisando foto para preencher o cadastro...");
+    try {
+      const reconhecido = await reconhecerComponentePorFoto(dataUrl);
+      setF((prev) => ({
+        ...prev,
+        nome: prev.nome.trim() ? prev.nome : reconhecido.nome || prev.nome,
+        descricao: prev.descricao.trim() ? prev.descricao : reconhecido.descricao || prev.descricao,
+        resumoIA: prev.resumoIA
+          ? prev.resumoIA
+          : {
+              tipo: reconhecido.tipo,
+              pinagem: reconhecido.pinagem,
+              funcao: reconhecido.funcao,
+              incerto: reconhecido.confianca !== "alta" || !reconhecido.nome,
+            },
+      }));
+      setAutoPreenchido(true);
+    } catch (err) {
+      setFotoError("Foto salva, mas não consegui analisar automaticamente. Preencha os campos manualmente.");
     } finally {
       setFotoLoading(false);
+      setFotoStatus("");
+    }
+  }
+
+  async function handleGerarResumo() {
+    if (!f.nome.trim()) return;
+    setIaError("");
+    setIaLoading(true);
+    try {
+      const resumo = await gerarResumoIA({ nome: f.nome, aplicacao: f.aplicacao, descricao: f.descricao });
+      set("resumoIA", resumo);
+    } catch (err) {
+      setIaError("Não consegui gerar o resumo agora. Tente novamente.");
+    } finally {
+      setIaLoading(false);
     }
   }
 
@@ -713,6 +774,16 @@ function ComponentForm({ initial, onCancel, onSave }) {
                 )}
               </div>
             </div>
+            {fotoLoading && (
+              <p className="text-xs mt-1.5 flex items-center gap-1.5 justify-center" style={{ color: COLORS.orangeDark }}>
+                <Loader2 size={12} className="animate-spin" /> {fotoStatus}
+              </p>
+            )}
+            {autoPreenchido && !fotoLoading && (
+              <p className="text-xs mt-1.5 flex items-center gap-1.5 justify-center text-center" style={{ color: COLORS.green }}>
+                <Sparkles size={12} /> Preenchi alguns campos com base na foto — confira e complete o resto.
+              </p>
+            )}
             {fotoError && <p className="text-xs mt-1 text-center" style={{ color: COLORS.red }}>{fotoError}</p>}
           </div>
 
@@ -735,6 +806,32 @@ function ComponentForm({ initial, onCancel, onSave }) {
           <div>
             <label className={label} style={labelStyle}>Descrição</label>
             <textarea className={field} style={fieldStyle} rows={2} value={f.descricao} onChange={(e) => set("descricao", e.target.value)} placeholder="Termistor NTC, disco 20mm, 120Ω a 25°C" />
+          </div>
+
+          <div className="rounded p-2.5" style={{ background: COLORS.bg }}>
+            <button
+              type="button"
+              onClick={handleGerarResumo}
+              disabled={!f.nome.trim() || iaLoading}
+              className="text-xs font-medium px-3 py-1.5 rounded flex items-center gap-1.5 disabled:opacity-50"
+              style={{ background: COLORS.orangeDark, color: "white" }}
+            >
+              {iaLoading ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+              {f.resumoIA ? "Gerar novamente" : "Gerar resumo técnico (IA)"}
+            </button>
+            {iaError && <p className="text-xs mt-1.5" style={{ color: COLORS.red }}>{iaError}</p>}
+            {f.resumoIA && (
+              <div className="mt-2 text-xs" style={{ color: COLORS.dark }}>
+                <p className="mb-1"><span className="font-medium">Tipo: </span>{f.resumoIA.tipo}</p>
+                <p className="mb-1"><span className="font-medium">Pinagem: </span>{f.resumoIA.pinagem}</p>
+                <p><span className="font-medium">Função: </span>{f.resumoIA.funcao}</p>
+                {f.resumoIA.incerto && (
+                  <p className="mt-1 italic" style={{ color: COLORS.orangeDark }}>
+                    A IA não tem certeza sobre esse componente — confira antes de confiar totalmente.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-3 gap-3">
