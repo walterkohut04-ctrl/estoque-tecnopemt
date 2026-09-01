@@ -7,5 +7,5 @@ import tailwindcss from '@tailwindcss/vite'
 // em https://SEU-USUARIO.github.io/NOME-DO-REPOSITORIO/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  base: '/tecnopemt-estoque/',
+  base: base: '/estoque-tecnopemt/',
 })
