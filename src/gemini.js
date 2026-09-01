@@ -1,27 +1,19 @@
+import { GoogleGenAI } from "@google/genai";
+
 // Chave da API do Google Gemini (gratuita, com cota diária).
 // Crie a sua em https://aistudio.google.com/apikey e cole aqui.
 //
 // IMPORTANTE: como este repositório é público, essa chave fica visível
-// pra quem olhar o código. Configure uma restrição de "HTTP referrer" no
-// Google AI Studio / Google Cloud Console, limitando o uso dessa chave
-// só ao domínio do site (https://walterkohut04-ctrl.github.io/*), para
-// que ninguém consiga usá-la fora do seu site mesmo tendo acesso a ela.
+// pra quem olhar o código. As chaves novas do Gemini (formato "AQ...")
+// já vêm restritas automaticamente só à API do Gemini, o que reduz
+// bastante o risco mesmo estando exposta.
 const GEMINI_API_KEY = "AQ.Ab8RN6I1mJMPX-NmiC6UdYd_-5xrS4B97INugTFHCAxAHq4jBw";
 
+const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 const MODEL = "gemini-2.5-flash";
-const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 
-async function chamarGemini(parts) {
-  const response = await fetch(ENDPOINT, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ contents: [{ parts }] }),
-  });
-  if (!response.ok) {
-    throw new Error(`Gemini respondeu ${response.status}`);
-  }
-  const data = await response.json();
-  const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "";
+function extrairJSON(response) {
+  const text = response.text || "";
   const clean = text.replace(/```json|```/g, "").trim();
   return JSON.parse(clean);
 }
@@ -39,7 +31,17 @@ Responda APENAS com um JSON válido, sem markdown, sem texto antes ou depois, no
 
 Regra importante: só preencha "nome" se conseguir LER um código real impresso na peça na foto. Se não der pra ler nenhum código com clareza, deixe "nome" como string vazia e baseie os outros campos apenas no que for visualmente identificável. Nunca invente um código específico que você não consegue ler claramente na imagem.`;
 
-  return chamarGemini([{ inline_data: { mime_type: mimeType, data: base64Data } }, { text: prompt }]);
+  const response = await ai.models.generateContent({
+    model: MODEL,
+    contents: [
+      {
+        role: "user",
+        parts: [{ inlineData: { mimeType, data: base64Data } }, { text: prompt }],
+      },
+    ],
+  });
+
+  return extrairJSON(response);
 }
 
 export async function gerarResumoIA({ nome, aplicacao, descricao }) {
@@ -54,5 +56,10 @@ Responda APENAS com um JSON válido, sem markdown, sem texto antes ou depois, no
 
 Se você não tiver certeza sobre o componente específico, use os campos com sua melhor estimativa e marque "incerto" como true.`;
 
-  return chamarGemini([{ text: prompt }]);
+  const response = await ai.models.generateContent({
+    model: MODEL,
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+  });
+
+  return extrairJSON(response);
 }
