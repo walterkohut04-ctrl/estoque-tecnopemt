@@ -4,6 +4,7 @@ import {
   MapPin, Loader2, ChevronDown, ChevronUp, User, Camera, ImageOff, Download,
 } from "lucide-react";
 import { db } from "./firebase";
+import { sugerirComponente } from "./componentesConhecidos";
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc,
   query, orderBy, getDocs, writeBatch, serverTimestamp,
@@ -638,9 +639,27 @@ function ComponentForm({ initial, onCancel, onSave }) {
   const [fotoLoading, setFotoLoading] = useState(false);
   const [fotoError, setFotoError] = useState("");
   const [salvando, setSalvando] = useState(false);
+  const [sugestao, setSugestao] = useState(null);
+  const [sugestaoDispensada, setSugestaoDispensada] = useState(false);
 
   function set(k, v) {
     setF((prev) => ({ ...prev, [k]: v }));
+  }
+
+  function handleNomeChange(valor) {
+    set("nome", valor);
+    setSugestaoDispensada(false);
+    const achado = sugerirComponente(valor);
+    setSugestao(achado);
+  }
+
+  function aceitarSugestao() {
+    if (!sugestao) return;
+    setF((prev) => ({
+      ...prev,
+      descricao: prev.descricao.trim() ? prev.descricao : `${sugestao.tipo}. ${sugestao.descricao}`,
+    }));
+    setSugestaoDispensada(true);
   }
 
   async function handleFoto(e) {
@@ -740,7 +759,7 @@ function ComponentForm({ initial, onCancel, onSave }) {
             </div>
             <div>
               <label className={label} style={labelStyle}>Nome do componente *</label>
-              <input required className={field} style={fieldStyle} value={f.nome} onChange={(e) => set("nome", e.target.value)} placeholder="NTC 120D-20" />
+              <input required className={field} style={fieldStyle} value={f.nome} onChange={(e) => handleNomeChange(e.target.value)} placeholder="NTC 120D-20" />
             </div>
           </div>
 
@@ -748,6 +767,35 @@ function ComponentForm({ initial, onCancel, onSave }) {
             <label className={label} style={labelStyle}>Aplicação</label>
             <input className={field} style={fieldStyle} value={f.aplicacao} onChange={(e) => set("aplicacao", e.target.value)} placeholder="Fonte Curtis 1244" />
           </div>
+
+          {sugestao && !sugestaoDispensada && (
+            <div className="rounded p-2.5 flex items-start gap-2" style={{ background: "#FBEBDB", border: `1px solid ${COLORS.orange}` }}>
+              <div className="flex-1">
+                <p className="text-xs font-medium" style={{ color: COLORS.orangeDark }}>
+                  Isso parece ser: {sugestao.tipo}
+                </p>
+                <p className="text-xs mt-0.5" style={{ color: COLORS.dark }}>{sugestao.descricao}</p>
+              </div>
+              <div className="flex flex-col gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={aceitarSugestao}
+                  className="text-xs font-medium px-2 py-1 rounded text-white"
+                  style={{ background: COLORS.orange }}
+                >
+                  Usar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSugestaoDispensada(true)}
+                  className="text-xs px-2 py-1"
+                  style={{ color: COLORS.textMuted }}
+                >
+                  Dispensar
+                </button>
+              </div>
+            </div>
+          )}
 
           <div>
             <label className={label} style={labelStyle}>Descrição</label>
