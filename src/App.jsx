@@ -622,6 +622,7 @@ function ComponentForm({ initial, onCancel, onSave }) {
     foto: initial?.foto || "",
   });
   const fileInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
   const [fotoLoading, setFotoLoading] = useState(false);
   const [fotoError, setFotoError] = useState("");
   const [salvando, setSalvando] = useState(false);
@@ -678,6 +679,7 @@ function ComponentForm({ initial, onCancel, onSave }) {
           <div>
             <label className={label} style={labelStyle}>Foto do item</label>
             <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFoto} disabled={fotoLoading} />
+            <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFoto} disabled={fotoLoading} />
             <div className="flex flex-col items-center gap-2">
               {f.foto ? (
                 <img src={f.foto} alt="Prévia" className="rounded object-cover w-full" style={{ maxWidth: 200, aspectRatio: "1 / 1", border: `1px solid ${COLORS.border}` }} />
@@ -689,13 +691,22 @@ function ComponentForm({ initial, onCancel, onSave }) {
               <div className="flex items-center gap-3 flex-wrap justify-center">
                 <button
                   type="button"
-                  onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                  onClick={() => cameraInputRef.current && cameraInputRef.current.click()}
                   disabled={fotoLoading}
                   className="text-xs font-medium px-3 py-2 rounded cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
                   style={{ background: COLORS.orange, color: "white" }}
                 >
                   {fotoLoading ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
-                  {f.foto ? "Trocar foto" : "Adicionar foto"}
+                  Tirar foto agora
+                </button>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                  disabled={fotoLoading}
+                  className="text-xs font-medium px-3 py-2 rounded cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                  style={{ background: COLORS.bg, color: COLORS.dark, border: `1px solid ${COLORS.border}` }}
+                >
+                  {f.foto ? "Trocar da galeria" : "Escolher da galeria"}
                 </button>
                 {f.foto && !fotoLoading && (
                   <button type="button" onClick={() => set("foto", "")} className="text-xs" style={{ color: COLORS.red }}>Remover</button>
