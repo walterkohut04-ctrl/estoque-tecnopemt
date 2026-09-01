@@ -18,6 +18,22 @@ function extrairJSON(response) {
   return JSON.parse(clean);
 }
 
+async function comRetry(fn, tentativas = 2) {
+  let ultimoErro;
+  for (let i = 0; i < tentativas; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      ultimoErro = err;
+      console.error(`Tentativa ${i + 1} falhou:`, err.name, err.message);
+      if (i < tentativas - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+      }
+    }
+  }
+  throw ultimoErro;
+}
+
 export async function reconhecerComponentePorFoto(dataUrl) {
   const match = dataUrl.match(/^data:(image\/\w+);base64,(.*)$/);
   if (!match) throw new Error("Formato de imagem inválido");
@@ -31,15 +47,17 @@ Responda APENAS com um JSON válido, sem markdown, sem texto antes ou depois, no
 
 Regra importante: só preencha "nome" se conseguir LER um código real impresso na peça na foto. Se não der pra ler nenhum código com clareza, deixe "nome" como string vazia e baseie os outros campos apenas no que for visualmente identificável. Nunca invente um código específico que você não consegue ler claramente na imagem.`;
 
-  const response = await ai.models.generateContent({
-    model: MODEL,
-    contents: [
-      {
-        role: "user",
-        parts: [{ inlineData: { mimeType, data: base64Data } }, { text: prompt }],
-      },
-    ],
-  });
+  const response = await comRetry(() =>
+    ai.models.generateContent({
+      model: MODEL,
+      contents: [
+        {
+          role: "user",
+          parts: [{ inlineData: { mimeType, data: base64Data } }, { text: prompt }],
+        },
+      ],
+    })
+  );
 
   return extrairJSON(response);
 }
@@ -56,10 +74,12 @@ Responda APENAS com um JSON válido, sem markdown, sem texto antes ou depois, no
 
 Se você não tiver certeza sobre o componente específico, use os campos com sua melhor estimativa e marque "incerto" como true.`;
 
-  const response = await ai.models.generateContent({
-    model: MODEL,
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-  });
+  const response = await comRetry(() =>
+    ai.models.generateContent({
+      model: MODEL,
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+    })
+  );
 
   return extrairJSON(response);
 }

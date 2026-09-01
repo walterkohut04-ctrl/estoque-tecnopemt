@@ -686,7 +686,10 @@ function ComponentForm({ initial, onCancel, onSave }) {
       }));
       setAutoPreenchido(true);
     } catch (err) {
-      setFotoError("Foto salva, mas não consegui analisar automaticamente. Preencha os campos manualmente.");
+      console.error("Falha no reconhecimento por foto:", err);
+      setFotoError(
+        `Foto salva, mas não consegui analisar automaticamente (${err.name || "erro"}: ${err.message || "desconhecido"}). Preencha os campos manualmente.`
+      );
     } finally {
       setFotoLoading(false);
       setFotoStatus("");
