@@ -6,7 +6,7 @@ import {
 import { db } from "./firebase";
 import { sugerirComponente } from "./componentesConhecidos";
 import {
-  collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc,
+  collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc,
   query, orderBy, getDocs, writeBatch, serverTimestamp,
 } from "firebase/firestore";
 
@@ -223,21 +223,19 @@ export default function App() {
   }
 
   async function importarBackup(comps, movs) {
-    const idMap = {};
     for (const c of comps) {
-      const { id: oldId, ...data } = c;
-      const ref = await addDoc(collection(db, "components"), {
-        ...data,
-        createdAt: serverTimestamp(),
-      });
-      if (oldId) idMap[oldId] = ref.id;
+      const { id, createdAt, ...data } = c;
+      if (!id) continue;
+      await setDoc(
+        doc(db, "components", id),
+        { ...data, createdAt: serverTimestamp() },
+        { merge: true }
+      );
     }
     for (const m of movs) {
-      const { id: oldId, componentId, ...data } = m;
-      await addDoc(collection(db, "movements"), {
-        ...data,
-        componentId: idMap[componentId] || componentId,
-      });
+      const { id, ...data } = m;
+      if (!id) continue;
+      await setDoc(doc(db, "movements", id), data, { merge: true });
     }
   }
 
