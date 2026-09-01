@@ -222,6 +222,24 @@ export default function App() {
     await Promise.all(relacionados.map((m) => deleteDoc(doc(db, "movements", m.id))));
   }
 
+  async function apagarTudo() {
+    const [compsSnap, movsSnap] = await Promise.all([
+      getDocs(collection(db, "components")),
+      getDocs(collection(db, "movements")),
+    ]);
+    const todosIds = [
+      ...compsSnap.docs.map((d) => ({ col: "components", id: d.id })),
+      ...movsSnap.docs.map((d) => ({ col: "movements", id: d.id })),
+    ];
+    // Firestore permite no máximo 500 operações por lote
+    for (let i = 0; i < todosIds.length; i += 450) {
+      const lote = todosIds.slice(i, i + 450);
+      const batch = writeBatch(db);
+      lote.forEach(({ col, id }) => batch.delete(doc(db, col, id)));
+      await batch.commit();
+    }
+  }
+
   async function importarBackup(comps, movs) {
     for (const c of comps) {
       const { id, createdAt, ...data } = c;
@@ -484,6 +502,7 @@ export default function App() {
           components={components}
           movements={movements}
           onImport={importarBackup}
+          onWipe={apagarTudo}
           onCancel={() => setImportModalOpen(false)}
         />
       )}
@@ -1073,13 +1092,29 @@ function LoginModal({ usuarios, meuNome, onCancel, onLogin, onTrocarSenha, onRes
   );
 }
 
-function ImportModal({ components, movements, onImport, onCancel }) {
+function ImportModal({ components, movements, onImport, onWipe, onCancel }) {
   const [texto, setTexto] = useState("");
   const [erro, setErro] = useState("");
   const [importando, setImportando] = useState(false);
   const [sucesso, setSucesso] = useState(0);
   const [mostrarColar, setMostrarColar] = useState(false);
+  const [mostrarWipe, setMostrarWipe] = useState(false);
+  const [confirmacaoWipe, setConfirmacaoWipe] = useState("");
+  const [apagando, setApagando] = useState(false);
+  const [wipeFeito, setWipeFeito] = useState(false);
   const fileInputRef = useRef(null);
+
+  async function confirmarWipe() {
+    setApagando(true);
+    try {
+      await onWipe();
+      setWipeFeito(true);
+    } catch (e) {
+      setErro("Não consegui apagar tudo. Tente novamente.");
+    } finally {
+      setApagando(false);
+    }
+  }
 
   function processarTexto(conteudo) {
     setErro("");
@@ -1210,6 +1245,59 @@ function ImportModal({ components, movements, onImport, onCancel }) {
                 </button>
               </div>
             )}
+
+            <div className="mt-4 pt-3" style={{ borderTop: `1px solid ${COLORS.border}` }}>
+              {!mostrarWipe ? (
+                <button
+                  type="button"
+                  onClick={() => setMostrarWipe(true)}
+                  className="w-full text-xs"
+                  style={{ color: COLORS.red }}
+                >
+                  Apagar TODOS os itens do estoque
+                </button>
+              ) : wipeFeito ? (
+                <p className="text-xs text-center" style={{ color: COLORS.green }}>
+                  Tudo apagado. Agora pode importar o backup corrigido.
+                </p>
+              ) : (
+                <div className="rounded p-2.5" style={{ background: COLORS.redBg }}>
+                  <p className="text-xs mb-2" style={{ color: COLORS.red }}>
+                    Isso apaga TODOS os itens e movimentações do estoque, de todo mundo, sem volta. Só use se
+                    tiver certeza. Digite <span className="font-mono font-medium">APAGAR TUDO</span> abaixo para confirmar.
+                  </p>
+                  <input
+                    value={confirmacaoWipe}
+                    onChange={(e) => setConfirmacaoWipe(e.target.value)}
+                    placeholder="Digite APAGAR TUDO"
+                    className="w-full rounded px-2 py-1.5 text-xs mb-2 outline-none"
+                    style={{ border: `1px solid ${COLORS.red}` }}
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMostrarWipe(false);
+                        setConfirmacaoWipe("");
+                      }}
+                      className="flex-1 rounded py-1.5 text-xs font-medium"
+                      style={{ background: COLORS.panel, color: COLORS.dark, border: `1px solid ${COLORS.border}` }}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={confirmarWipe}
+                      disabled={confirmacaoWipe !== "APAGAR TUDO" || apagando}
+                      className="flex-1 rounded py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                      style={{ background: COLORS.red }}
+                    >
+                      {apagando ? "Apagando..." : "Confirmar"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </>
         )}
       </div>
