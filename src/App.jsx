@@ -95,6 +95,18 @@ export default function App() {
   const [meuNome, setMeuNome] = useState("");
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [online, setOnline] = useState(navigator.onLine);
+
+  useEffect(() => {
+    const setOn = () => setOnline(true);
+    const setOff = () => setOnline(false);
+    window.addEventListener("online", setOn);
+    window.addEventListener("offline", setOff);
+    return () => {
+      window.removeEventListener("online", setOn);
+      window.removeEventListener("offline", setOff);
+    };
+  }, []);
 
   // sincronização em tempo real dos itens
   useEffect(() => {
@@ -315,6 +327,22 @@ export default function App() {
                   CONTROLE DE ESTOQUE
                 </div>
               </div>
+              <div
+                className="flex items-center gap-1 text-[10px] ml-2 px-2 py-1 rounded-full"
+                style={{ background: COLORS.darkSoft, color: online ? "#8FD9A8" : "#E39A9A" }}
+                title={online ? "Conectado" : "Sem conexão"}
+              >
+                <span
+                  style={{
+                    width: 7,
+                    height: 7,
+                    borderRadius: 999,
+                    background: online ? COLORS.green : COLORS.red,
+                    display: "inline-block",
+                  }}
+                />
+                {online ? "Conectado" : "Offline"}
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -441,7 +469,12 @@ export default function App() {
       )}
 
       {importModalOpen && (
-        <ImportModal onImport={importarBackup} onCancel={() => setImportModalOpen(false)} />
+        <ImportModal
+          components={components}
+          movements={movements}
+          onImport={importarBackup}
+          onCancel={() => setImportModalOpen(false)}
+        />
       )}
     </div>
   );
@@ -925,25 +958,31 @@ function LoginModal({ usuarios, meuNome, onCancel, onLogin, onTrocarSenha, onRes
   );
 }
 
-function ImportModal({ onImport, onCancel }) {
+function ImportModal({ components, movements, onImport, onCancel }) {
   const [texto, setTexto] = useState("");
   const [erro, setErro] = useState("");
   const [importando, setImportando] = useState(false);
   const [sucesso, setSucesso] = useState(0);
+  const [mostrarColar, setMostrarColar] = useState(false);
+  const fileInputRef = useRef(null);
 
-  async function confirmar() {
+  function processarTexto(conteudo) {
     setErro("");
     let parsed;
     try {
-      parsed = JSON.parse(texto);
+      parsed = JSON.parse(conteudo);
     } catch (e) {
-      setErro("Não consegui ler esse texto. Confira se colou tudo, sem cortar nada.");
-      return;
+      setErro("Não consegui ler esse arquivo/texto. Confira se é um backup válido, sem estar cortado.");
+      return null;
     }
     if (!parsed || !Array.isArray(parsed.components)) {
-      setErro("Esse texto não parece ser um backup válido.");
-      return;
+      setErro("Esse arquivo não parece ser um backup válido.");
+      return null;
     }
+    return parsed;
+  }
+
+  async function importarDados(parsed) {
     setImportando(true);
     try {
       await onImport(parsed.components, parsed.movements || []);
@@ -955,11 +994,41 @@ function ImportModal({ onImport, onCancel }) {
     }
   }
 
+  function handleArquivo(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const parsed = processarTexto(ev.target.result);
+      if (parsed) importarDados(parsed);
+    };
+    reader.onerror = () => setErro("Não consegui ler o arquivo. Tente novamente.");
+    reader.readAsText(file);
+  }
+
+  function confirmarTexto() {
+    const parsed = processarTexto(texto);
+    if (parsed) importarDados(parsed);
+  }
+
+  function baixarBackup() {
+    const payload = JSON.stringify({ components, movements }, null, 2);
+    const blob = new Blob([payload], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `backup-estoque-tecnopemt-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(69,59,60,0.55)" }}>
       <div style={{ background: COLORS.panel }} className="w-full max-w-md rounded p-4">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold" style={{ color: COLORS.dark }}>Importar dados</h2>
+          <h2 className="text-lg font-semibold" style={{ color: COLORS.dark }}>Backup dos dados</h2>
           <button type="button" onClick={onCancel}><X size={20} color={COLORS.textMuted} /></button>
         </div>
 
@@ -974,31 +1043,58 @@ function ImportModal({ onImport, onCancel }) {
           </>
         ) : (
           <>
-            <p className="text-xs mb-2" style={{ color: COLORS.textMuted }}>
-              Cole abaixo o texto exportado do sistema anterior (botão de download &gt; Exportar &gt; copiar).
-              Isso adiciona os itens ao que já está cadastrado aqui, sem apagar nada.
-            </p>
-            <textarea
-              value={texto}
-              onChange={(e) => setTexto(e.target.value)}
-              placeholder="Cole aqui o texto do backup exportado"
-              className="w-full text-xs font-mono rounded p-2 outline-none"
-              style={{ border: `1px solid ${COLORS.border}`, height: 180 }}
-            />
+            <input ref={fileInputRef} type="file" accept="application/json,.json" className="hidden" onChange={handleArquivo} />
+
+            <button
+              type="button"
+              onClick={() => fileInputRef.current && fileInputRef.current.click()}
+              disabled={importando}
+              className="w-full rounded flex items-center justify-center gap-2 px-3 py-3 text-sm font-medium text-white disabled:opacity-50"
+              style={{ background: COLORS.orange }}
+            >
+              {importando ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+              {importando ? "Importando..." : "Selecionar arquivo .json para importar"}
+            </button>
+
+            <button
+              type="button"
+              onClick={baixarBackup}
+              className="w-full text-xs mt-2 rounded px-3 py-2"
+              style={{ background: COLORS.bg, color: COLORS.dark }}
+            >
+              Baixar backup dos dados atuais (.json)
+            </button>
+
             {erro && <p className="text-xs mt-2" style={{ color: COLORS.red }}>{erro}</p>}
-            <div className="flex gap-2 mt-3">
-              <button onClick={onCancel} className="flex-1 rounded py-2.5 text-sm font-medium" style={{ background: COLORS.bg, color: COLORS.dark }}>
-                Cancelar
-              </button>
-              <button
-                onClick={confirmar}
-                disabled={!texto.trim() || importando}
-                className="flex-1 rounded py-2.5 text-sm font-medium text-white disabled:opacity-50"
-                style={{ background: COLORS.orange }}
-              >
-                {importando ? "Importando..." : "Importar"}
-              </button>
-            </div>
+
+            <button
+              type="button"
+              onClick={() => setMostrarColar((v) => !v)}
+              className="w-full text-xs mt-3"
+              style={{ color: COLORS.textMuted }}
+            >
+              {mostrarColar ? "Ocultar opção de colar texto" : "Ou colar o texto do backup em vez de arquivo"}
+            </button>
+
+            {mostrarColar && (
+              <div className="mt-2">
+                <textarea
+                  value={texto}
+                  onChange={(e) => setTexto(e.target.value)}
+                  placeholder="Cole aqui o texto do backup exportado"
+                  className="w-full text-xs font-mono rounded p-2 outline-none"
+                  style={{ border: `1px solid ${COLORS.border}`, height: 140 }}
+                />
+                <button
+                  onClick={confirmarTexto}
+                  disabled={!texto.trim() || importando}
+                  className="w-full rounded py-2 mt-2 text-sm font-medium text-white disabled:opacity-50"
+                  style={{ background: COLORS.orangeDark }}
+                >
+                  Importar texto colado
+                </button>
+              </div>
+            )}
           </>
         )}
       </div>
