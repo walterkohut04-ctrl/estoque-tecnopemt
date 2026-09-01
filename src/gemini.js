@@ -6,7 +6,7 @@
 // Google AI Studio / Google Cloud Console, limitando o uso dessa chave
 // só ao domínio do site (https://walterkohut04-ctrl.github.io/*), para
 // que ninguém consiga usá-la fora do seu site mesmo tendo acesso a ela.
-const GEMINI_API_KEY = "COLE_AQUI_SUA_CHAVE_GEMINI";
+const GEMINI_API_KEY = "AQ.Ab8RN6I1mJMPX-NmiC6UdYd_-5xrS4B97INugTFHCAxAHq4jBw";
 
 const MODEL = "gemini-2.5-flash";
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI_API_KEY}`;
