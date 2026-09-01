@@ -94,7 +94,6 @@ export default function App() {
   const [usuarios, setUsuarios] = useState([]);
   const [meuNome, setMeuNome] = useState("");
   const [loginModalOpen, setLoginModalOpen] = useState(false);
-  const [importModalOpen, setImportModalOpen] = useState(false);
 
   // sincronização em tempo real dos itens
   useEffect(() => {
@@ -208,25 +207,6 @@ export default function App() {
     await Promise.all(relacionados.map((m) => deleteDoc(doc(db, "movements", m.id))));
   }
 
-  async function importarBackup(comps, movs) {
-    const idMap = {};
-    for (const c of comps) {
-      const { id: oldId, ...data } = c;
-      const ref = await addDoc(collection(db, "components"), {
-        ...data,
-        createdAt: serverTimestamp(),
-      });
-      if (oldId) idMap[oldId] = ref.id;
-    }
-    for (const m of movs) {
-      const { id: oldId, componentId, ...data } = m;
-      await addDoc(collection(db, "movements"), {
-        ...data,
-        componentId: idMap[componentId] || componentId,
-      });
-    }
-  }
-
   function requestMove(componentId, tipo) {
     if (!meuNome) {
       setLoginModalOpen(true);
@@ -316,24 +296,14 @@ export default function App() {
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setImportModalOpen(true)}
-                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded"
-                style={{ background: COLORS.darkSoft, color: "#EDE3E2" }}
-                title="Importar dados do sistema anterior"
-              >
-                <Download size={13} />
-              </button>
-              <button
-                onClick={() => setLoginModalOpen(true)}
-                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded"
-                style={{ background: COLORS.darkSoft, color: "#EDE3E2" }}
-              >
-                <User size={13} />
-                {meuNome}
-              </button>
-            </div>
+            <button
+              onClick={() => setLoginModalOpen(true)}
+              className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded"
+              style={{ background: COLORS.darkSoft, color: "#EDE3E2" }}
+            >
+              <User size={13} />
+              {meuNome}
+            </button>
           </div>
 
           <div className="flex gap-3 mt-4 flex-wrap">
@@ -438,10 +408,6 @@ export default function App() {
             setLoginModalOpen(false);
           }}
         />
-      )}
-
-      {importModalOpen && (
-        <ImportModal onImport={importarBackup} onCancel={() => setImportModalOpen(false)} />
       )}
     </div>
   );
@@ -919,87 +885,6 @@ function LoginModal({ usuarios, meuNome, onCancel, onLogin, onTrocarSenha, onRes
             </button>
             <button type="button" onClick={() => setTela("perfil")} className="w-full text-xs mt-2" style={{ color: COLORS.textMuted }}>Cancelar</button>
           </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ImportModal({ onImport, onCancel }) {
-  const [texto, setTexto] = useState("");
-  const [erro, setErro] = useState("");
-  const [importando, setImportando] = useState(false);
-  const [sucesso, setSucesso] = useState(0);
-
-  async function confirmar() {
-    setErro("");
-    let parsed;
-    try {
-      parsed = JSON.parse(texto);
-    } catch (e) {
-      setErro("Não consegui ler esse texto. Confira se colou tudo, sem cortar nada.");
-      return;
-    }
-    if (!parsed || !Array.isArray(parsed.components)) {
-      setErro("Esse texto não parece ser um backup válido.");
-      return;
-    }
-    setImportando(true);
-    try {
-      await onImport(parsed.components, parsed.movements || []);
-      setSucesso(parsed.components.length);
-    } catch (e) {
-      setErro("Falha ao gravar no banco de dados. Tente novamente.");
-    } finally {
-      setImportando(false);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(69,59,60,0.55)" }}>
-      <div style={{ background: COLORS.panel }} className="w-full max-w-md rounded p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold" style={{ color: COLORS.dark }}>Importar dados</h2>
-          <button type="button" onClick={onCancel}><X size={20} color={COLORS.textMuted} /></button>
-        </div>
-
-        {sucesso > 0 ? (
-          <>
-            <p className="text-sm mb-3" style={{ color: COLORS.green }}>
-              {sucesso} {sucesso === 1 ? "item importado" : "itens importados"} com sucesso! Fecha essa janela pra ver na lista.
-            </p>
-            <button onClick={onCancel} className="w-full rounded py-2.5 text-sm font-medium text-white" style={{ background: COLORS.orange }}>
-              Fechar
-            </button>
-          </>
-        ) : (
-          <>
-            <p className="text-xs mb-2" style={{ color: COLORS.textMuted }}>
-              Cole abaixo o texto exportado do sistema anterior (botão de download &gt; Exportar &gt; copiar).
-              Isso adiciona os itens ao que já está cadastrado aqui, sem apagar nada.
-            </p>
-            <textarea
-              value={texto}
-              onChange={(e) => setTexto(e.target.value)}
-              placeholder="Cole aqui o texto do backup exportado"
-              className="w-full text-xs font-mono rounded p-2 outline-none"
-              style={{ border: `1px solid ${COLORS.border}`, height: 180 }}
-            />
-            {erro && <p className="text-xs mt-2" style={{ color: COLORS.red }}>{erro}</p>}
-            <div className="flex gap-2 mt-3">
-              <button onClick={onCancel} className="flex-1 rounded py-2.5 text-sm font-medium" style={{ background: COLORS.bg, color: COLORS.dark }}>
-                Cancelar
-              </button>
-              <button
-                onClick={confirmar}
-                disabled={!texto.trim() || importando}
-                className="flex-1 rounded py-2.5 text-sm font-medium text-white disabled:opacity-50"
-                style={{ background: COLORS.orange }}
-              >
-                {importando ? "Importando..." : "Importar"}
-              </button>
-            </div>
-          </>
         )}
       </div>
     </div>
