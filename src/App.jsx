@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Plus, Minus, Search, AlertTriangle, Package, Trash2, Pencil, X, History,
-  MapPin, Loader2, ChevronDown, ChevronUp, User, Camera, ImageOff, Download,
+  MapPin, Loader2, ChevronDown, ChevronUp, User, Camera, ImageOff, Download, Smartphone,
 } from "lucide-react";
 import { db } from "./firebase";
 import { sugerirComponente } from "./componentesConhecidos";
@@ -98,6 +98,8 @@ export default function App() {
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [online, setOnline] = useState(navigator.onLine);
+  const [installPrompt, setInstallPrompt] = useState(null);
+  const [jaInstalado, setJaInstalado] = useState(false);
 
   useEffect(() => {
     const setOn = () => setOnline(true);
@@ -109,6 +111,40 @@ export default function App() {
       window.removeEventListener("offline", setOff);
     };
   }, []);
+
+  // captura o evento do navegador que permite instalar o app (Android/Chrome)
+  useEffect(() => {
+    const standalone =
+      window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+    setJaInstalado(standalone);
+
+    const handler = (e) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+    };
+    window.addEventListener("beforeinstallprompt", handler);
+
+    const onInstalled = () => {
+      setInstallPrompt(null);
+      setJaInstalado(true);
+    };
+    window.addEventListener("appinstalled", onInstalled);
+
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handler);
+      window.removeEventListener("appinstalled", onInstalled);
+    };
+  }, []);
+
+  async function instalarApp() {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    await installPrompt.userChoice;
+    setInstallPrompt(null);
+  }
+
+  const isIOS = /iphone|ipad|ipod/i.test(window.navigator.userAgent);
+  const [instrucoesIOSOpen, setInstrucoesIOSOpen] = useState(false);
 
   // sincronização em tempo real dos itens
   useEffect(() => {
@@ -363,6 +399,16 @@ export default function App() {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              {!jaInstalado && (installPrompt || isIOS) && (
+                <button
+                  onClick={isIOS ? () => setInstrucoesIOSOpen(true) : instalarApp}
+                  className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded font-medium"
+                  style={{ background: COLORS.orange, color: "white" }}
+                >
+                  <Smartphone size={13} />
+                  Instalar app
+                </button>
+              )}
               <button
                 onClick={() => setImportModalOpen(true)}
                 className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded"
@@ -505,6 +551,35 @@ export default function App() {
           onWipe={apagarTudo}
           onCancel={() => setImportModalOpen(false)}
         />
+      )}
+
+      {instrucoesIOSOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(69,59,60,0.55)" }}>
+          <div style={{ background: COLORS.panel }} className="w-full max-w-sm rounded p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold" style={{ color: COLORS.dark }}>Instalar no iPhone</h2>
+              <button type="button" onClick={() => setInstrucoesIOSOpen(false)}><X size={20} color={COLORS.textMuted} /></button>
+            </div>
+            <p className="text-sm mb-2" style={{ color: COLORS.dark }}>
+              O iPhone não deixa instalar direto pelo app — são só 2 toques manuais:
+            </p>
+            <ol className="text-sm flex flex-col gap-2" style={{ color: COLORS.dark }}>
+              <li>
+                <span className="font-medium">1.</span> Toca no ícone de <span className="font-medium">compartilhar</span> (quadrado com seta pra cima), na barra do Safari
+              </li>
+              <li>
+                <span className="font-medium">2.</span> Rola a lista e toca em <span className="font-medium">"Adicionar à Tela de Início"</span>
+              </li>
+            </ol>
+            <button
+              onClick={() => setInstrucoesIOSOpen(false)}
+              className="w-full rounded py-2.5 mt-4 text-sm font-medium text-white"
+              style={{ background: COLORS.orange }}
+            >
+              Entendi
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
