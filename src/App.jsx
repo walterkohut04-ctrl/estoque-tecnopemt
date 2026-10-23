@@ -51,6 +51,16 @@ const STATUS_META = {
   ok: { label: "Estoque ok", color: COLORS.green, bg: COLORS.greenBg },
 };
 
+// minúsculas, sem acentos e com espaços simples — para a busca não diferenciar "Diodo", "DIODO" ou "diodo"
+function normalizarBusca(s) {
+  return String(s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function currency(v) {
   const n = Number(v);
   if (isNaN(n)) return "—";
@@ -338,15 +348,16 @@ export default function App() {
   const filtered = useMemo(() => {
     let list = components;
     if (filterCritico) list = list.filter((c) => statusOf(c) === "critico");
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter(
-        (c) =>
-          c.nome?.toLowerCase().includes(q) ||
-          c.localizacao?.toLowerCase().includes(q) ||
-          c.aplicacao?.toLowerCase().includes(q) ||
-          c.descricao?.toLowerCase().includes(q)
-      );
+    const termos = normalizarBusca(search).split(" ").filter(Boolean);
+    if (termos.length) {
+      list = list.filter((c) => {
+        const texto = normalizarBusca(
+          [c.nome, c.localizacao, c.aplicacao, c.descricao, c.observacao, c.localCompra].join(" ")
+        );
+        const compacto = texto.replace(/[^a-z0-9]/g, "");
+        // cada palavra digitada precisa aparecer em algum lugar do item, em qualquer ordem
+        return termos.every((t) => texto.includes(t) || compacto.includes(t.replace(/[^a-z0-9]/g, "")));
+      });
     }
     return list;
   }, [components, search, filterCritico]);
@@ -479,7 +490,7 @@ export default function App() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar por código, nome, local ou aplicação..."
+              placeholder="Buscar por código, nome, local, aplicação ou descrição..."
               className="w-full rounded pl-8 pr-3 py-2 text-sm outline-none"
               style={{ border: `1px solid ${COLORS.border}`, background: COLORS.panel }}
             />
