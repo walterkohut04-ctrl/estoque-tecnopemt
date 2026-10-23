@@ -352,7 +352,7 @@ export default function App() {
     if (termos.length) {
       list = list.filter((c) => {
         const texto = normalizarBusca(
-          [c.nome, c.localizacao, c.aplicacao, c.descricao, c.observacao, c.localCompra].join(" ")
+          [c.nome, c.localizacao, c.aplicacao, c.descricao].join(" ")
         );
         const compacto = texto.replace(/[^a-z0-9]/g, "");
         // cada palavra digitada precisa aparecer em algum lugar do item, em qualquer ordem
