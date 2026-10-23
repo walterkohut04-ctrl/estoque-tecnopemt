@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Plus, Minus, Search, AlertTriangle, Package, Trash2, Pencil, X, History,
-  MapPin, Loader2, ChevronDown, ChevronUp, User, Camera, ImageOff, Download, Smartphone,
+  MapPin, Loader2, ChevronDown, ChevronUp, User, Camera, ImageOff, Download, Smartphone, Truck,
 } from "lucide-react";
 import { db } from "./firebase";
 import { sugerirComponente } from "./componentesConhecidos";
@@ -57,7 +57,7 @@ function currency(v) {
   return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
-function compressImage(file, maxWidth = 500, quality = 0.7) {
+function compressImage(file, maxWidth = 1000, quality = 0.75) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -92,6 +92,7 @@ export default function App() {
   const [editingId, setEditingId] = useState(null);
   const [moveModal, setMoveModal] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [fotoAmpliada, setFotoAmpliada] = useState(null);
 
   const [usuarios, setUsuarios] = useState([]);
   const [meuNome, setMeuNome] = useState("");
@@ -306,7 +307,14 @@ export default function App() {
     if (!comp) return;
     const delta = tipo === "entrada" ? quantidade : -quantidade;
     const novaQtd = Math.max(0, (comp.qtd || 0) + delta);
-    await updateDoc(doc(db, "components", componentId), { qtd: novaQtd });
+    const atualizacao = { qtd: novaQtd };
+    // pedido entregue: ao dar entrada e o estoque passar do mínimo, limpa a marcação de pedido
+    if (tipo === "entrada" && comp.pedidoFeito && novaQtd > (comp.min || 0)) {
+      atualizacao.pedidoFeito = false;
+      atualizacao.pedidoData = null;
+      atualizacao.pedidoPor = null;
+    }
+    await updateDoc(doc(db, "components", componentId), atualizacao);
     await addDoc(collection(db, "movements"), {
       componentId,
       tipo,
@@ -316,6 +324,15 @@ export default function App() {
       responsavel: meuNome || "—",
     });
     setMoveModal(null);
+  }
+
+  async function marcarPedido(componentId, marcado) {
+    await updateDoc(
+      doc(db, "components", componentId),
+      marcado
+        ? { pedidoFeito: true, pedidoData: new Date().toISOString(), pedidoPor: meuNome || "—" }
+        : { pedidoFeito: false, pedidoData: null, pedidoPor: null }
+    );
   }
 
   const filtered = useMemo(() => {
@@ -335,6 +352,7 @@ export default function App() {
   }, [components, search, filterCritico]);
 
   const criticoCount = components.filter((c) => statusOf(c) === "critico").length;
+  const pedidoCount = components.filter((c) => statusOf(c) === "critico" && c.pedidoFeito).length;
 
   if (!meuNome) {
     return (
@@ -445,7 +463,10 @@ export default function App() {
                 {criticoCount > 0 && <AlertTriangle size={16} color={COLORS.orange} />}
                 {criticoCount}
               </div>
-              <div className="text-xs" style={{ color: "#C9BAB8" }}>abaixo do mínimo</div>
+              <div className="text-xs" style={{ color: "#C9BAB8" }}>
+                abaixo do mínimo
+                {pedidoCount > 0 && ` · ${pedidoCount} já ${pedidoCount === 1 ? "pedido" : "pedidos"}`}
+              </div>
             </button>
           </div>
         </div>
@@ -497,6 +518,8 @@ export default function App() {
                 onEdit={() => openEdit(c.id)}
                 onDelete={() => setConfirmDelete(c)}
                 onMove={(tipo) => requestMove(c.id, tipo)}
+                onFoto={() => setFotoAmpliada(c)}
+                onPedido={(marcado) => marcarPedido(c.id, marcado)}
                 movimentos={movements.filter((m) => m.componentId === c.id)}
               />
             ))}
@@ -515,6 +538,35 @@ export default function App() {
           onCancel={() => setMoveModal(null)}
           onConfirm={(qtd, obs) => registerMovement(moveModal.componentId, moveModal.tipo, qtd, obs)}
         />
+      )}
+
+      {fotoAmpliada && (
+        <div
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center p-4"
+          style={{ background: "rgba(20,16,16,0.92)" }}
+          onClick={() => setFotoAmpliada(null)}
+        >
+          <button
+            type="button"
+            onClick={() => setFotoAmpliada(null)}
+            className="absolute top-3 right-3 p-2 rounded-full"
+            style={{ background: "rgba(255,255,255,0.15)" }}
+            aria-label="Fechar"
+          >
+            <X size={22} color="white" />
+          </button>
+          <img
+            src={fotoAmpliada.foto}
+            alt={fotoAmpliada.nome}
+            className="rounded"
+            style={{ maxWidth: "100%", maxHeight: "80vh", objectFit: "contain", background: "white" }}
+          />
+          <div className="text-white text-sm mt-3 text-center">
+            <span className="font-medium">{fotoAmpliada.nome}</span>
+            {fotoAmpliada.localizacao && <span style={{ color: "#C9BAB8" }}> · {fotoAmpliada.localizacao}</span>}
+          </div>
+          <div className="text-xs mt-1" style={{ color: "#C9BAB8" }}>Toque em qualquer lugar para fechar</div>
+        </div>
       )}
 
       {confirmDelete && (
@@ -585,7 +637,18 @@ export default function App() {
   );
 }
 
-function ComponentCard({ comp, expanded, onToggle, onEdit, onDelete, onMove, movimentos }) {
+function ComponentCard({ comp, expanded, onToggle, onEdit, onDelete, onMove, onFoto, onPedido, movimentos }) {
+  const [salvandoPedido, setSalvandoPedido] = useState(false);
+
+  async function togglePedido(e) {
+    setSalvandoPedido(true);
+    try {
+      await onPedido(e.target.checked);
+    } finally {
+      setSalvandoPedido(false);
+    }
+  }
+
   const status = statusOf(comp);
   const meta = STATUS_META[status];
   const pct = comp.max > comp.min ? Math.min(1, (comp.qtd - comp.min) / (comp.max - comp.min)) : comp.qtd > 0 ? 1 : 0;
@@ -600,12 +663,14 @@ function ComponentCard({ comp, expanded, onToggle, onEdit, onDelete, onMove, mov
           <div className="flex justify-between items-start gap-3">
             <div className="flex gap-3 min-w-0">
               {comp.foto ? (
-                <img
-                  src={comp.foto}
-                  alt={comp.nome}
-                  className="rounded shrink-0 object-cover"
-                  style={{ width: 52, height: 52, border: `1px solid ${COLORS.border}` }}
-                />
+                <button type="button" onClick={onFoto} className="shrink-0 p-0" title="Ampliar foto">
+                  <img
+                    src={comp.foto}
+                    alt={comp.nome}
+                    className="rounded object-cover block"
+                    style={{ width: 52, height: 52, border: `1px solid ${COLORS.border}`, cursor: "zoom-in" }}
+                  />
+                </button>
               ) : (
                 <div
                   className="rounded shrink-0 flex items-center justify-center"
@@ -623,6 +688,11 @@ function ComponentCard({ comp, expanded, onToggle, onEdit, onDelete, onMove, mov
                   <span className="text-xs px-1.5 py-0.5 rounded font-medium" style={{ background: meta.bg, color: meta.color }}>
                     {meta.label}
                   </span>
+                  {status === "critico" && comp.pedidoFeito && (
+                    <span className="text-xs px-1.5 py-0.5 rounded font-medium flex items-center gap-1" style={{ background: "#E6EEF7", color: "#2F5E8C" }}>
+                      <Truck size={11} /> Pedido feito
+                    </span>
+                  )}
                 </div>
                 <h3 className="text-lg mt-1 truncate font-semibold" style={{ color: COLORS.dark }}>
                   {comp.nome}
@@ -655,6 +725,35 @@ function ComponentCard({ comp, expanded, onToggle, onEdit, onDelete, onMove, mov
                 </span>
               )}
             </div>
+          )}
+
+          {status === "critico" && (
+            <label
+              className="flex items-start gap-2 mt-3 rounded px-2.5 py-2 text-xs cursor-pointer select-none"
+              style={{
+                background: comp.pedidoFeito ? "#E6EEF7" : COLORS.bg,
+                border: `1px solid ${comp.pedidoFeito ? "#B9CDE3" : COLORS.border}`,
+                color: COLORS.dark,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={!!comp.pedidoFeito}
+                onChange={togglePedido}
+                disabled={salvandoPedido}
+                className="mt-0.5"
+                style={{ width: 16, height: 16, accentColor: "#2F5E8C" }}
+              />
+              <span>
+                <span className="font-medium">Pedido feito — aguardando entrega e entrada em estoque</span>
+                {comp.pedidoFeito && comp.pedidoData && (
+                  <span className="block mt-0.5" style={{ color: COLORS.textMuted }}>
+                    Marcado em {new Date(comp.pedidoData).toLocaleDateString("pt-BR")}
+                    {comp.pedidoPor && ` por ${comp.pedidoPor}`}
+                  </span>
+                )}
+              </span>
+            </label>
           )}
 
           <div className="flex items-center gap-2 mt-3 flex-wrap">
