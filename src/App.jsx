@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Plus, Minus, Search, AlertTriangle, Package, Trash2, Pencil, X, History,
-  MapPin, Loader2, ChevronDown, ChevronUp, User, Camera, ImageOff, Download, Smartphone, Truck,
+  MapPin, Loader2, ChevronDown, ChevronUp, User, Camera, ImageOff, Download, Smartphone, Truck, Users,
 } from "lucide-react";
 import { db } from "./firebase";
 import { sugerirComponente } from "./componentesConhecidos";
@@ -34,6 +34,11 @@ const USUARIOS_PADRAO = [
 ];
 
 const SESSION_KEY = "tecnopemt-estoque-sessao";
+const ADMIN_FIXO = "Walter Kohut";
+
+function ehAdmin(u) {
+  return !!u && (u.nome === ADMIN_FIXO || u.admin === true);
+}
 
 function senhasIguais(a, b) {
   return String(a || "").trim() === String(b || "").trim();
@@ -105,6 +110,7 @@ export default function App() {
   const [fotoAmpliada, setFotoAmpliada] = useState(null);
 
   const [usuarios, setUsuarios] = useState([]);
+  const [usuariosCarregados, setUsuariosCarregados] = useState(false);
   const [meuNome, setMeuNome] = useState("");
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
@@ -180,23 +186,64 @@ export default function App() {
     return unsub;
   }, []);
 
-  // usuários: carrega e, se a coleção estiver vazia, cria os padrão
+  // usuários: sincroniza em tempo real e, se a coleção estiver vazia, cria os padrão
   useEffect(() => {
-    (async () => {
-      const snap = await getDocs(collection(db, "usuarios"));
+    let criandoPadrao = false;
+    const unsub = onSnapshot(collection(db, "usuarios"), async (snap) => {
       if (snap.empty) {
+        if (criandoPadrao) return;
+        criandoPadrao = true;
         const batch = writeBatch(db);
         USUARIOS_PADRAO.forEach((u) => {
           const ref = doc(collection(db, "usuarios"));
           batch.set(ref, { nome: u.nome, senha: u.senha });
         });
         await batch.commit();
-        setUsuarios(USUARIOS_PADRAO.map((u) => ({ ...u })));
-      } else {
-        setUsuarios(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        return;
       }
-    })();
+      const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      lista.sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "pt-BR"));
+      setUsuarios(lista);
+      setUsuariosCarregados(true);
+    });
+    return unsub;
   }, []);
+
+  // se o usuário logado neste aparelho foi excluído, encerra a sessão
+  useEffect(() => {
+    if (usuariosCarregados && meuNome && !usuarios.some((u) => u.nome === meuNome)) {
+      setMeuNome("");
+      localStorage.removeItem(SESSION_KEY);
+    }
+  }, [usuariosCarregados, usuarios, meuNome]);
+
+  async function adicionarUsuario(nome, senha, admin) {
+    const n = String(nome || "").trim().replace(/\s+/g, " ");
+    const sn = String(senha || "").trim();
+    if (!n) return { ok: false, erro: "Informe o nome." };
+    if (sn.length < 4) return { ok: false, erro: "A senha precisa ter pelo menos 4 dígitos/caracteres." };
+    if (usuarios.some((u) => (u.nome || "").toLowerCase() === n.toLowerCase()))
+      return { ok: false, erro: "Já existe um usuário com esse nome." };
+    try {
+      await addDoc(collection(db, "usuarios"), { nome: n, senha: sn, senhaPadrao: sn, admin: !!admin });
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, erro: "Não consegui salvar. Tente novamente." };
+    }
+  }
+
+  async function excluirUsuario(id) {
+    const user = usuarios.find((u) => u.id === id);
+    if (!user) return { ok: false, erro: "Usuário não encontrado." };
+    if (user.nome === meuNome) return { ok: false, erro: "Você não pode excluir a si mesmo." };
+    if (user.nome === ADMIN_FIXO) return { ok: false, erro: "O administrador principal não pode ser excluído." };
+    try {
+      await deleteDoc(doc(db, "usuarios", id));
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, erro: "Não consegui excluir. Tente novamente." };
+    }
+  }
 
   // sessão local (por aparelho)
   useEffect(() => {
@@ -219,7 +266,6 @@ export default function App() {
     if (!senhasIguais(senhaAtual, user.senha)) return { ok: false, erro: "Senha atual incorreta." };
     try {
       await updateDoc(doc(db, "usuarios", user.id), { senha: String(novaSenha).trim() });
-      setUsuarios((prev) => prev.map((u) => (u.id === user.id ? { ...u, senha: novaSenha } : u)));
       return { ok: true };
     } catch (e) {
       return { ok: false, erro: "Não consegui salvar a nova senha. Tente novamente." };
@@ -227,12 +273,11 @@ export default function App() {
   }
 
   async function resetarSenhaPadrao(nome) {
-    const padrao = USUARIOS_PADRAO.find((u) => u.nome === nome);
     const user = usuarios.find((u) => u.nome === nome);
-    if (!padrao || !user) return { ok: false, erro: "Usuário não encontrado." };
+    const senhaPadrao = user?.senhaPadrao || USUARIOS_PADRAO.find((u) => u.nome === nome)?.senha;
+    if (!user || !senhaPadrao) return { ok: false, erro: "Usuário não encontrado." };
     try {
-      await updateDoc(doc(db, "usuarios", user.id), { senha: padrao.senha });
-      setUsuarios((prev) => prev.map((u) => (u.id === user.id ? { ...u, senha: padrao.senha } : u)));
+      await updateDoc(doc(db, "usuarios", user.id), { senha: senhaPadrao });
       return { ok: true };
     } catch (e) {
       return { ok: false, erro: "Não consegui redefinir. Tente novamente." };
@@ -599,6 +644,9 @@ export default function App() {
           onLogin={fazerLogin}
           onTrocarSenha={trocarSenha}
           onResetSenha={resetarSenhaPadrao}
+          souAdmin={ehAdmin(usuarios.find((u) => u.nome === meuNome))}
+          onAdicionarUsuario={adicionarUsuario}
+          onExcluirUsuario={excluirUsuario}
           onLogout={() => {
             fazerLogout();
             setLoginModalOpen(false);
@@ -1138,7 +1186,10 @@ function MoveModal({ tipo, comp, onCancel, onConfirm }) {
   );
 }
 
-function LoginModal({ usuarios, meuNome, onCancel, onLogin, onTrocarSenha, onResetSenha, onLogout, mandatory }) {
+function LoginModal({
+  usuarios, meuNome, onCancel, onLogin, onTrocarSenha, onResetSenha, onLogout, mandatory,
+  souAdmin, onAdicionarUsuario, onExcluirUsuario,
+}) {
   const [tela, setTela] = useState(meuNome ? "perfil" : "lista");
   const [selecionado, setSelecionado] = useState(null);
   const [senha, setSenha] = useState("");
@@ -1193,13 +1244,14 @@ function LoginModal({ usuarios, meuNome, onCancel, onLogin, onTrocarSenha, onRes
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(69,59,60,0.55)" }}>
-      <div style={{ background: COLORS.panel }} className="w-full max-w-xs rounded p-4">
+      <div style={{ background: COLORS.panel }} className={`w-full ${tela === "gerenciar" ? "max-w-sm" : "max-w-xs"} rounded p-4`}>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-semibold" style={{ color: COLORS.dark }}>
             {tela === "perfil" && "Minha conta"}
             {tela === "lista" && "Quem é você?"}
             {tela === "senha" && selecionado}
             {tela === "trocar" && "Alterar senha"}
+            {tela === "gerenciar" && "Gerenciar usuários"}
           </h2>
           <button type="button" onClick={onCancel} style={{ visibility: mandatory ? "hidden" : "visible" }}>
             <X size={20} color={COLORS.textMuted} />
@@ -1217,6 +1269,11 @@ function LoginModal({ usuarios, meuNome, onCancel, onLogin, onTrocarSenha, onRes
             </p>
             <button onClick={() => setTela("lista")} className="text-sm text-left rounded px-3 py-2" style={{ background: COLORS.bg, color: COLORS.dark }}>Trocar de usuário</button>
             <button onClick={() => { setErro(""); setSenhaAtual(""); setNovaSenha(""); setConfirmaSenha(""); setTela("trocar"); }} className="text-sm text-left rounded px-3 py-2" style={{ background: COLORS.bg, color: COLORS.dark }}>Alterar minha senha</button>
+            {souAdmin && (
+              <button onClick={() => setTela("gerenciar")} className="text-sm text-left rounded px-3 py-2 flex items-center gap-2" style={{ background: COLORS.bg, color: COLORS.dark }}>
+                <Users size={14} /> Gerenciar usuários
+              </button>
+            )}
             <button onClick={onLogout} className="text-sm text-left rounded px-3 py-2" style={{ background: COLORS.redBg, color: COLORS.red }}>Sair</button>
           </div>
         )}
@@ -1272,7 +1329,113 @@ function LoginModal({ usuarios, meuNome, onCancel, onLogin, onTrocarSenha, onRes
             <button type="button" onClick={() => setTela("perfil")} className="w-full text-xs mt-2" style={{ color: COLORS.textMuted }}>Cancelar</button>
           </div>
         )}
+
+        {tela === "gerenciar" && souAdmin && (
+          <GerenciarUsuarios
+            usuarios={usuarios}
+            meuNome={meuNome}
+            onAdicionar={onAdicionarUsuario}
+            onExcluir={onExcluirUsuario}
+            onVoltar={() => setTela("perfil")}
+          />
+        )}
       </div>
+    </div>
+  );
+}
+
+function GerenciarUsuarios({ usuarios, meuNome, onAdicionar, onExcluir, onVoltar }) {
+  const [nome, setNome] = useState("");
+  const [senha, setSenha] = useState("");
+  const [admin, setAdmin] = useState(false);
+  const [erro, setErro] = useState("");
+  const [aviso, setAviso] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  const [confirmandoId, setConfirmandoId] = useState(null);
+  const [excluindo, setExcluindo] = useState(false);
+
+  async function adicionar() {
+    setErro("");
+    setAviso("");
+    setSalvando(true);
+    const res = await onAdicionar(nome, senha, admin);
+    setSalvando(false);
+    if (!res.ok) { setErro(res.erro); return; }
+    setAviso(`${nome.trim()} adicionado.`);
+    setNome("");
+    setSenha("");
+    setAdmin(false);
+  }
+
+  async function excluir(id) {
+    setErro("");
+    setAviso("");
+    setExcluindo(true);
+    const res = await onExcluir(id);
+    setExcluindo(false);
+    setConfirmandoId(null);
+    if (!res.ok) setErro(res.erro);
+  }
+
+  const campo = "w-full rounded px-3 py-2 text-sm outline-none";
+  const campoStyle = { border: `1px solid ${COLORS.border}` };
+
+  return (
+    <div>
+      <div className="flex flex-col gap-1.5 mb-3" style={{ maxHeight: 260, overflowY: "auto" }}>
+        {usuarios.map((u) => {
+          const protegido = u.nome === meuNome || u.nome === ADMIN_FIXO;
+          return (
+            <div key={u.id} className="rounded px-3 py-2 text-sm" style={{ background: COLORS.bg, color: COLORS.dark }}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate">
+                  {u.nome}
+                  {ehAdmin(u) && <span className="text-[10px] ml-1.5 px-1 py-0.5 rounded" style={{ background: "#FBEBDB", color: COLORS.orangeDark }}>admin</span>}
+                  {u.nome === meuNome && <span className="text-[10px] ml-1.5" style={{ color: COLORS.textMuted }}>(você)</span>}
+                </span>
+                {!protegido && confirmandoId !== u.id && (
+                  <button type="button" onClick={() => setConfirmandoId(u.id)} title="Excluir usuário" style={{ color: COLORS.textMuted }}>
+                    <Trash2 size={15} />
+                  </button>
+                )}
+              </div>
+              {confirmandoId === u.id && (
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-xs flex-1" style={{ color: COLORS.red }}>Excluir {u.nome}?</span>
+                  <button type="button" onClick={() => setConfirmandoId(null)} className="text-xs px-2 py-1 rounded" style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}` }}>
+                    Não
+                  </button>
+                  <button type="button" onClick={() => excluir(u.id)} disabled={excluindo} className="text-xs px-2 py-1 rounded text-white disabled:opacity-50" style={{ background: COLORS.red }}>
+                    {excluindo ? "..." : "Excluir"}
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="pt-3" style={{ borderTop: `1px solid ${COLORS.border}` }}>
+        <span className="text-xs font-medium block mb-2" style={{ color: COLORS.dark }}>NOVO USUÁRIO</span>
+        <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Nome completo" className={`${campo} mb-2`} style={campoStyle} />
+        <input value={senha} onChange={(e) => setSenha(e.target.value)} placeholder="Senha inicial (mín. 4)" inputMode="numeric"
+          onKeyDown={(e) => e.key === "Enter" && adicionar()}
+          className={`${campo} font-mono mb-2`} style={campoStyle} />
+        <label className="flex items-center gap-2 text-xs mb-2 cursor-pointer select-none" style={{ color: COLORS.dark }}>
+          <input type="checkbox" checked={admin} onChange={(e) => setAdmin(e.target.checked)} style={{ accentColor: COLORS.orange }} />
+          Administrador (pode gerenciar usuários)
+        </label>
+        {erro && <p className="text-xs mb-2" style={{ color: COLORS.red }}>{erro}</p>}
+        {aviso && <p className="text-xs mb-2" style={{ color: COLORS.green }}>{aviso}</p>}
+        <button type="button" onClick={adicionar} disabled={salvando} className="w-full rounded py-2.5 text-sm font-medium text-white disabled:opacity-50 flex items-center justify-center gap-1.5" style={{ background: COLORS.orange }}>
+          <Plus size={15} /> {salvando ? "Salvando..." : "Adicionar usuário"}
+        </button>
+        <p className="text-[11px] mt-2" style={{ color: COLORS.textMuted }}>
+          A senha inicial também é a usada no "Esqueci a senha". Cada pessoa pode trocar a sua depois em Minha conta.
+        </p>
+      </div>
+
+      <button type="button" onClick={onVoltar} className="w-full text-xs mt-3" style={{ color: COLORS.textMuted }}>Voltar</button>
     </div>
   );
 }
