@@ -235,8 +235,12 @@ export default function App() {
   async function excluirUsuario(id) {
     const user = usuarios.find((u) => u.id === id);
     if (!user) return { ok: false, erro: "Usuário não encontrado." };
-    if (user.nome === meuNome) return { ok: false, erro: "Você não pode excluir a si mesmo." };
-    if (user.nome === ADMIN_FIXO) return { ok: false, erro: "O administrador principal não pode ser excluído." };
+    // o cadastro "principal" de cada nome é o primeiro da lista (o mesmo usado no login);
+    // cópias duplicadas do mesmo nome podem ser excluídas
+    const principal = usuarios.find((u) => u.nome === user.nome);
+    const duplicado = principal && principal.id !== user.id;
+    if (!duplicado && user.nome === meuNome) return { ok: false, erro: "Você não pode excluir a si mesmo." };
+    if (!duplicado && user.nome === ADMIN_FIXO) return { ok: false, erro: "O administrador principal não pode ser excluído." };
     try {
       await deleteDoc(doc(db, "usuarios", id));
       return { ok: true };
@@ -1384,14 +1388,19 @@ function GerenciarUsuarios({ usuarios, meuNome, onAdicionar, onExcluir, onVoltar
     <div>
       <div className="flex flex-col gap-1.5 mb-3" style={{ maxHeight: 260, overflowY: "auto" }}>
         {usuarios.map((u) => {
-          const protegido = u.nome === meuNome || u.nome === ADMIN_FIXO;
+          const duplicado = usuarios.find((x) => x.nome === u.nome)?.id !== u.id;
+          const protegido = !duplicado && (u.nome === meuNome || u.nome === ADMIN_FIXO);
           return (
             <div key={u.id} className="rounded px-3 py-2 text-sm" style={{ background: COLORS.bg, color: COLORS.dark }}>
               <div className="flex items-center justify-between gap-2">
                 <span className="truncate">
                   {u.nome}
                   {ehAdmin(u) && <span className="text-[10px] ml-1.5 px-1 py-0.5 rounded" style={{ background: "#FBEBDB", color: COLORS.orangeDark }}>admin</span>}
-                  {u.nome === meuNome && <span className="text-[10px] ml-1.5" style={{ color: COLORS.textMuted }}>(você)</span>}
+                  {duplicado ? (
+                    <span className="text-[10px] ml-1.5 px-1 py-0.5 rounded" style={{ background: COLORS.redBg, color: COLORS.red }}>cadastro duplicado</span>
+                  ) : (
+                    u.nome === meuNome && <span className="text-[10px] ml-1.5" style={{ color: COLORS.textMuted }}>(você)</span>
+                  )}
                 </span>
                 {!protegido && confirmandoId !== u.id && (
                   <button type="button" onClick={() => setConfirmandoId(u.id)} title="Excluir usuário" style={{ color: COLORS.textMuted }}>
