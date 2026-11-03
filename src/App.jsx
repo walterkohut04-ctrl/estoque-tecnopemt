@@ -22,6 +22,9 @@ const COLORS = {
   greenBg: "#E7F3EC",
   red: "#C0392B",
   redBg: "#FBEAE8",
+  yellow: "#E8B923",
+  yellowDark: "#9A7300",
+  yellowBg: "#FDF5D6",
   textMuted: "#8A7A78",
 };
 
@@ -45,13 +48,17 @@ function senhasIguais(a, b) {
 }
 
 function statusOf(c) {
-  if (c.qtd <= c.min) return "critico";
-  if (c.qtd <= c.min * 1.25) return "atencao";
+  const qtd = Number(c.qtd) || 0;
+  const min = Number(c.min) || 0;
+  if (qtd < min) return "critico";
+  if (qtd === min) return "minimo";
+  if (qtd <= min * 1.25) return "atencao";
   return "ok";
 }
 
 const STATUS_META = {
   critico: { label: "Abaixo do mínimo", color: COLORS.red, bg: COLORS.redBg },
+  minimo: { label: "No mínimo", color: COLORS.yellowDark, bg: COLORS.yellowBg },
   atencao: { label: "Próximo do mínimo", color: COLORS.orangeDark, bg: "#FBEBDB" },
   ok: { label: "Estoque ok", color: COLORS.green, bg: COLORS.greenBg },
 };
@@ -100,7 +107,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   const [search, setSearch] = useState("");
-  const [filterCritico, setFilterCritico] = useState(false);
+  const [filtroStatus, setFiltroStatus] = useState(null); // null | "critico" | "minimo"
   const [expanded, setExpanded] = useState(null);
 
   const [formOpen, setFormOpen] = useState(false);
@@ -396,7 +403,7 @@ export default function App() {
 
   const filtered = useMemo(() => {
     let list = components;
-    if (filterCritico) list = list.filter((c) => statusOf(c) === "critico");
+    if (filtroStatus) list = list.filter((c) => statusOf(c) === filtroStatus);
     const termos = normalizarBusca(search).split(" ").filter(Boolean);
     if (termos.length) {
       list = list.filter((c) => {
@@ -409,10 +416,12 @@ export default function App() {
       });
     }
     return list;
-  }, [components, search, filterCritico]);
+  }, [components, search, filtroStatus]);
 
   const criticoCount = components.filter((c) => statusOf(c) === "critico").length;
   const pedidoCount = components.filter((c) => statusOf(c) === "critico" && c.pedidoFeito).length;
+  const minimoCount = components.filter((c) => statusOf(c) === "minimo").length;
+  const pedidoMinimoCount = components.filter((c) => statusOf(c) === "minimo" && c.pedidoFeito).length;
 
   if (!meuNome) {
     return (
@@ -512,9 +521,9 @@ export default function App() {
               <div className="text-xs" style={{ color: "#C9BAB8" }}>itens cadastrados</div>
             </div>
             <button
-              onClick={() => setFilterCritico((v) => !v)}
+              onClick={() => setFiltroStatus((v) => (v === "critico" ? null : "critico"))}
               style={{
-                background: filterCritico ? COLORS.red : COLORS.darkSoft,
+                background: filtroStatus === "critico" ? COLORS.red : COLORS.darkSoft,
                 border: criticoCount > 0 ? `1px solid ${COLORS.red}` : "1px solid transparent",
               }}
               className="rounded px-4 py-2 flex-1 min-w-[120px] text-left transition-colors"
@@ -526,6 +535,23 @@ export default function App() {
               <div className="text-xs" style={{ color: "#C9BAB8" }}>
                 abaixo do mínimo
                 {pedidoCount > 0 && ` · ${pedidoCount} já ${pedidoCount === 1 ? "pedido" : "pedidos"}`}
+              </div>
+            </button>
+            <button
+              onClick={() => setFiltroStatus((v) => (v === "minimo" ? null : "minimo"))}
+              style={{
+                background: filtroStatus === "minimo" ? COLORS.yellowDark : COLORS.darkSoft,
+                border: minimoCount > 0 ? `1px solid ${COLORS.yellow}` : "1px solid transparent",
+              }}
+              className="rounded px-4 py-2 flex-1 min-w-[120px] text-left transition-colors"
+            >
+              <div className="text-white text-xl font-mono flex items-center gap-1.5">
+                {minimoCount > 0 && <AlertTriangle size={16} color={COLORS.yellow} />}
+                {minimoCount}
+              </div>
+              <div className="text-xs" style={{ color: "#C9BAB8" }}>
+                no mínimo
+                {pedidoMinimoCount > 0 && ` · ${pedidoMinimoCount} já ${pedidoMinimoCount === 1 ? "pedido" : "pedidos"}`}
               </div>
             </button>
           </div>
@@ -751,7 +777,7 @@ function ComponentCard({ comp, expanded, onToggle, onEdit, onDelete, onMove, onF
                   <span className="text-xs px-1.5 py-0.5 rounded font-medium" style={{ background: meta.bg, color: meta.color }}>
                     {meta.label}
                   </span>
-                  {status === "critico" && comp.pedidoFeito && (
+                  {(status === "critico" || status === "minimo") && comp.pedidoFeito && (
                     <span className="text-xs px-1.5 py-0.5 rounded font-medium flex items-center gap-1" style={{ background: "#E6EEF7", color: "#2F5E8C" }}>
                       <Truck size={11} /> Pedido feito
                     </span>
@@ -790,7 +816,7 @@ function ComponentCard({ comp, expanded, onToggle, onEdit, onDelete, onMove, onF
             </div>
           )}
 
-          {status === "critico" && (
+          {(status === "critico" || status === "minimo") && (
             <label
               className="flex items-start gap-2 mt-3 rounded px-2.5 py-2 text-xs cursor-pointer select-none"
               style={{
