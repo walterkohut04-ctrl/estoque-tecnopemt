@@ -368,12 +368,17 @@ export default function App() {
     setMoveModal({ componentId, tipo });
   }
 
-  async function registerMovement(componentId, tipo, quantidade, obs) {
+  async function registerMovement(componentId, tipo, quantidade, obs, compra = {}) {
     const comp = components.find((c) => c.id === componentId);
     if (!comp) return;
     const delta = tipo === "entrada" ? quantidade : -quantidade;
     const novaQtd = Math.max(0, (comp.qtd || 0) + delta);
     const atualizacao = { qtd: novaQtd };
+    // entrada com dados de compra: atualiza os mesmos campos da tela de edição
+    if (tipo === "entrada") {
+      if (compra.preco !== undefined && compra.preco !== null) atualizacao.precoUltimaCompra = compra.preco;
+      if (compra.local) atualizacao.localCompra = compra.local;
+    }
     // pedido entregue: ao dar entrada e o estoque passar do mínimo, limpa a marcação de pedido
     if (tipo === "entrada" && comp.pedidoFeito && novaQtd > (comp.min || 0)) {
       atualizacao.pedidoFeito = false;
@@ -388,6 +393,8 @@ export default function App() {
       data: new Date().toISOString(),
       obs: obs || "",
       responsavel: meuNome || "—",
+      ...(tipo === "entrada" && compra.preco != null ? { preco: compra.preco } : {}),
+      ...(tipo === "entrada" && compra.local ? { localCompra: compra.local } : {}),
     });
     setMoveModal(null);
   }
@@ -622,7 +629,7 @@ export default function App() {
           tipo={moveModal.tipo}
           comp={components.find((c) => c.id === moveModal.componentId)}
           onCancel={() => setMoveModal(null)}
-          onConfirm={(qtd, obs) => registerMovement(moveModal.componentId, moveModal.tipo, qtd, obs)}
+          onConfirm={(qtd, obs, compra) => registerMovement(moveModal.componentId, moveModal.tipo, qtd, obs, compra)}
         />
       )}
 
@@ -886,6 +893,11 @@ function ComponentCard({ comp, expanded, onToggle, onEdit, onDelete, onMove, onF
                         </span>
                         <span style={{ color: COLORS.textMuted }}>{new Date(m.data).toLocaleDateString("pt-BR")}</span>
                         {m.responsavel && <span style={{ color: COLORS.dark }} className="font-medium">{m.responsavel}</span>}
+                        {m.tipo === "entrada" && (m.preco != null || m.localCompra) && (
+                          <span style={{ color: COLORS.textMuted }}>
+                            · {m.preco != null ? currency(m.preco) : ""}{m.preco != null && m.localCompra ? " — " : ""}{m.localCompra || ""}
+                          </span>
+                        )}
                         {m.obs && <span style={{ color: COLORS.textMuted }}>· {m.obs}</span>}
                       </div>
                     ))}
@@ -1169,6 +1181,8 @@ function ConfirmDeleteModal({ comp, onCancel, onConfirm }) {
 function MoveModal({ tipo, comp, onCancel, onConfirm }) {
   const [qtd, setQtd] = useState(1);
   const [obs, setObs] = useState("");
+  const [preco, setPreco] = useState(comp?.precoUltimaCompra ?? "");
+  const [localCompra, setLocalCompra] = useState(comp?.localCompra || "");
   const [enviando, setEnviando] = useState(false);
   const isEntrada = tipo === "entrada";
   if (!comp) return null;
@@ -1178,7 +1192,13 @@ function MoveModal({ tipo, comp, onCancel, onConfirm }) {
     if (!n || n <= 0) return;
     setEnviando(true);
     try {
-      await onConfirm(n, obs);
+      const compra = isEntrada
+        ? {
+            preco: preco === "" || isNaN(Number(preco)) ? null : Number(preco),
+            local: String(localCompra || "").trim(),
+          }
+        : {};
+      await onConfirm(n, obs, compra);
     } finally {
       setEnviando(false);
     }
@@ -1200,6 +1220,24 @@ function MoveModal({ tipo, comp, onCancel, onConfirm }) {
         <input type="number" min="1" autoFocus value={qtd} onChange={(e) => setQtd(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submit()}
           className="w-full rounded px-3 py-2 text-sm font-mono mb-3 outline-none" style={{ border: `1px solid ${COLORS.border}` }} />
+        {isEntrada && (
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <label className="text-xs font-medium block mb-1" style={{ color: COLORS.dark }}>Preço última compra (R$)</label>
+              <input type="number" step="0.01" inputMode="decimal" value={preco} onChange={(e) => setPreco(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && submit()}
+                placeholder="0.00"
+                className="w-full rounded px-3 py-2 text-sm font-mono outline-none" style={{ border: `1px solid ${COLORS.border}` }} />
+            </div>
+            <div>
+              <label className="text-xs font-medium block mb-1" style={{ color: COLORS.dark }}>Local da compra</label>
+              <input value={localCompra} onChange={(e) => setLocalCompra(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && submit()}
+                placeholder="Mercado Livre / fornecedor"
+                className="w-full rounded px-3 py-2 text-sm outline-none" style={{ border: `1px solid ${COLORS.border}` }} />
+            </div>
+          </div>
+        )}
         <label className="text-xs font-medium block mb-1" style={{ color: COLORS.dark }}>Observação (opcional)</label>
         <input value={obs} onChange={(e) => setObs(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submit()}
