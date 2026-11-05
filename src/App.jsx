@@ -393,7 +393,7 @@ export default function App() {
       data: new Date().toISOString(),
       obs: obs || "",
       responsavel: meuNome || "—",
-      ...(tipo === "entrada" && compra.preco != null ? { preco: compra.preco } : {}),
+      ...(tipo === "entrada" && compra.preco != null ? { preco: compra.preco, precoLote: compra.precoLote } : {}),
       ...(tipo === "entrada" && compra.local ? { localCompra: compra.local } : {}),
     });
     setMoveModal(null);
@@ -895,7 +895,7 @@ function ComponentCard({ comp, expanded, onToggle, onEdit, onDelete, onMove, onF
                         {m.responsavel && <span style={{ color: COLORS.dark }} className="font-medium">{m.responsavel}</span>}
                         {m.tipo === "entrada" && (m.preco != null || m.localCompra) && (
                           <span style={{ color: COLORS.textMuted }}>
-                            · {m.preco != null ? currency(m.preco) : ""}{m.preco != null && m.localCompra ? " — " : ""}{m.localCompra || ""}
+                            · {m.preco != null ? (m.precoLote != null ? `${currency(m.precoLote)} (${currency(m.preco)}/un.)` : `${currency(m.preco)}/un.`) : ""}{m.preco != null && m.localCompra ? " — " : ""}{m.localCompra || ""}
                           </span>
                         )}
                         {m.obs && <span style={{ color: COLORS.textMuted }}>· {m.obs}</span>}
@@ -1111,7 +1111,7 @@ function ComponentForm({ initial, onCancel, onSave }) {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className={label} style={labelStyle}>Preço última compra (R$)</label>
+              <label className={label} style={labelStyle}>Preço unitário última compra (R$)</label>
               <input type="number" step="0.01" className={`${field} font-mono`} style={fieldStyle} value={f.precoUltimaCompra} onChange={(e) => set("precoUltimaCompra", e.target.value)} placeholder="0.00" />
             </div>
             <div>
@@ -1181,20 +1181,26 @@ function ConfirmDeleteModal({ comp, onCancel, onConfirm }) {
 function MoveModal({ tipo, comp, onCancel, onConfirm }) {
   const [qtd, setQtd] = useState(1);
   const [obs, setObs] = useState("");
-  const [preco, setPreco] = useState(comp?.precoUltimaCompra ?? "");
+  const [precoLote, setPrecoLote] = useState("");
   const [localCompra, setLocalCompra] = useState(comp?.localCompra || "");
   const [enviando, setEnviando] = useState(false);
   const isEntrada = tipo === "entrada";
   if (!comp) return null;
+
+  const qtdNum = Number(qtd);
+  const loteNum = Number(precoLote);
+  const unitario = precoLote !== "" && qtdNum > 0 && !isNaN(loteNum) ? loteNum / qtdNum : null;
 
   async function submit() {
     const n = Number(qtd);
     if (!n || n <= 0) return;
     setEnviando(true);
     try {
+      const lote = precoLote === "" || isNaN(Number(precoLote)) ? null : Number(precoLote);
       const compra = isEntrada
         ? {
-            preco: preco === "" || isNaN(Number(preco)) ? null : Number(preco),
+            preco: lote == null ? null : Math.round((lote / n) * 100) / 100,
+            precoLote: lote,
             local: String(localCompra || "").trim(),
           }
         : {};
@@ -1223,11 +1229,18 @@ function MoveModal({ tipo, comp, onCancel, onConfirm }) {
         {isEntrada && (
           <div className="grid grid-cols-2 gap-3 mb-3">
             <div>
-              <label className="text-xs font-medium block mb-1" style={{ color: COLORS.dark }}>Preço última compra (R$)</label>
-              <input type="number" step="0.01" inputMode="decimal" value={preco} onChange={(e) => setPreco(e.target.value)}
+              <label className="text-xs font-medium block mb-1" style={{ color: COLORS.dark }}>Preço total do lote (R$)</label>
+              <input type="number" step="0.01" inputMode="decimal" value={precoLote} onChange={(e) => setPrecoLote(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && submit()}
                 placeholder="0.00"
                 className="w-full rounded px-3 py-2 text-sm font-mono outline-none" style={{ border: `1px solid ${COLORS.border}` }} />
+              <p className="text-xs mt-1" style={{ color: unitario != null ? COLORS.green : COLORS.textMuted }}>
+                {unitario != null
+                  ? <>Unitário: <span className="font-mono font-medium">{currency(unitario)}</span></>
+                  : comp.precoUltimaCompra != null
+                    ? <>Último unitário: <span className="font-mono">{currency(comp.precoUltimaCompra)}</span></>
+                    : "Unitário calculado automaticamente"}
+              </p>
             </div>
             <div>
               <label className="text-xs font-medium block mb-1" style={{ color: COLORS.dark }}>Local da compra</label>
